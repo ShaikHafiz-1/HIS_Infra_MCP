@@ -1,0 +1,99 @@
+version: "3.9"
+
+services:
+  mcp_server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mcp_user:mcp_pass@db:5432/hospital_mcp
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      ENVIRONMENT: development
+      DEBUG: "false"
+      LOG_LEVEL: INFO
+      ENABLE_CACHING: "true"
+      ENABLE_AUDIT_LOGGING: "true"
+      ENABLE_HL7_INGESTION: "true"
+      ENABLE_FHIR_INGESTION: "true"
+      ENABLE_DICOM_INGESTION: "true"
+      ENABLE_DEVICE_TELEMETRY: "true"
+      JWT_SECRET_KEY: dev-secret-change-in-production-min-32-chars
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:8080"]'
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    volumes:
+      - audit_logs:/app/audit_logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: hospital_mcp
+      POSTGRES_USER: mcp_user
+      POSTGRES_PASSWORD: mcp_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcp_user -d hospital_mcp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  audit_logs:
+
+networks:
+  default:
+    name: hospital_mcp_network

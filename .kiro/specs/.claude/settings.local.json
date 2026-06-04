@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest tests/ -x --tb=short -q)",
+      "Bash(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest tests/ --tb=short -q)",
+      "Bash(python -m pytest tests/ --tb=short -q)",
+      "Bash(python -m pytest tests/unit/test_fhir_client.py --tb=long -q)",
+      "Bash(python -m pytest tests/ -q)",
+      "Bash(python -m pytest tests/ -q --no-header)",
+      "Bash(python -m pytest tests/)",
+      "Bash(grep -E \"=====.*=====\\\\$\")",
+      "Bash(python -m pytest tests/unit/test_patient_context_tool.py::TestPatientContextRetrieval::test_get_patient_clinical_context_with_clinicians tests/unit/test_patient_context_tool.py::TestPatientContextRetrieval::test_get_patient_clinical_context_with_devices --tb=short)",
+      "Bash(python -m pytest tests/unit/test_patient_context_tool.py::TestPatientContextRetrieval::test_get_patient_clinical_context_with_devices --tb=long)",
+      "Bash(python -m pytest \"tests/unit/test_patient_context_tool.py::TestPatientContextRetrieval::test_get_patient_clinical_context_with_devices\" -s)",
+      "Bash(python -m pytest \"tests/unit/test_patient_context_tool.py\" -s)",
+      "Bash(python -m pytest \"tests/unit/test_property_tests.py::TestProperty5AuditLoggingCompleteness\" --tb=short)",
+      "Bash(python -c \"from sqlalchemy import text; print\\('text import ok'\\)\")",
+      "Bash(python -c \"from sqlalchemy.ext.asyncio import create_async_engine; import asyncio; e = create_async_engine\\('sqlite+aiosqlite:///:memory:'\\); print\\('engine ok'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python demo.py)",
+      "Bash(python -c \"import streamlit; print\\('streamlit', streamlit.__version__\\)\")",
+      "Bash(pip install *)",
+      "Bash(python -m py_compile ui_demo.py)",
+      "Bash(streamlit run *)",
+      "Bash(curl -s http://localhost:8501/_stcore/health)",
+      "Bash(python3 -m streamlit --version)",
+      "Bash(python -m streamlit --version)"
+    ]
+  }
+}
