@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Today's Attention Dashboard</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #f5f5f5;
+    color: #1a1a1a;
+    padding: 0;
+    font-size: 14px;
+  }
+  .header {
+    background: #fff;
+    border-bottom: 1px solid #e5e5e5;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .header h1 { font-size: 16px; font-weight: 600; color: #1a1a1a; }
+  .header-meta { font-size: 12px; color: #888; }
+  .loading {
+    display: flex; align-items: center; justify-content: center;
+    padding: 60px 20px; color: #888; flex-direction: column; gap: 12px;
+  }
+  .spinner {
+    width: 28px; height: 28px;
+    border: 2px solid #e5e5e5; border-top-color: #555;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .content { padding: 16px 20px; display: flex; flex-direction: column; gap: 20px; }
+  .section-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: #888; margin-bottom: 8px;
+  }
+  .card {
+    background: #fff; border-radius: 10px; border: 1px solid #e8e8e8;
+    overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .item {
+    padding: 12px 14px; border-bottom: 1px solid #f0f0f0;
+    display: flex; align-items: flex-start; gap: 10px;
+    transition: background 0.1s;
+  }
+  .item:last-child { border-bottom: none; }
+  .item:hover { background: #fafafa; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 20px;
+    font-size: 11px; font-weight: 600; white-space: nowrap; flex-shrink: 0;
+  }
+  .pill-red    { background: #fff0f0; color: #c0392b; }
+  .pill-orange { background: #fff7ed; color: #c05c00; }
+  .pill-blue   { background: #f0f5ff; color: #2563eb; }
+  .pill-gray   { background: #f5f5f5; color: #555; }
+  .item-body { flex: 1; min-width: 0; }
+  .item-subject {
+    font-size: 13px; font-weight: 500; color: #1a1a1a;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 3px;
+  }
+  .item-meta {
+    font-size: 12px; color: #888;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .snippet {
+    font-size: 12px; color: #999; margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .item-time { font-size: 11px; color: #aaa; white-space: nowrap; flex-shrink: 0; margin-top: 1px; }
+  .summary-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .stat-card {
+    background: #fff; border: 1px solid #e8e8e8; border-radius: 10px;
+    padding: 14px 16px; flex: 1; min-width: 80px; text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .stat-num { font-size: 26px; font-weight: 700; line-height: 1; margin-bottom: 4px; }
+  .stat-label { font-size: 11px; color: #888; }
+  .stat-red .stat-num { color: #c0392b; }
+  .stat-orange .stat-num { color: #c05c00; }
+  .stat-blue .stat-num { color: #2563eb; }
+  .stat-gray .stat-num { color: #555; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📥 Needs Your Attention</h1>
+  <span class="header-meta" id="last-updated">Loading…</span>
+</div>
+
+<div id="app">
+  <div class="loading">
+    <div class="spinner"></div>
+    <span>Checking your inbox…</span>
+  </div>
+</div>
+
+<script>
+const GMAIL = 'mcp__b139d678-ad55-4564-9240-fca23a9466bd__search_threads';
+
+function fmt(dateStr) {
+  const d = new Date(dateStr), now = new Date(), h = (now - d) / 3.6e6;
+  if (h < 1) return Math.round(h * 60) + 'm ago';
+  if (h < 24) return Math.round(h) + 'h ago';
+  return Math.round(h / 24) + 'd ago';
+}
+
+function clean(s) { return (s || '').replace(/[^\x20-\x7E-￿]/g, '').replace(/\s+/g,' ').trim(); }
+
+async function fetch(q, n = 20) {
+  try { const r = await window.cowork.callMcpTool(GMAIL, { query: q, pageSize: n }); return r?.threads || []; }
+  catch(e) { console.error(e); return []; }
+}
+
+function cat(t) {
+  const m = t.messages[0];
+  const s = (m.sender || '').toLowerCase();
+  const sub = (m.subject || '').toLowerCase();
+  if (sub.includes('payment fail') || sub.includes('failed')) return { cat:'action', label:'⚡ Action', pill:'pill-red', pri:1 };
+  if (sub.includes('confirm') && (m.labelIds||[]).includes('IMPORTANT')) return { cat:'action', label:'⚡ Action', pill:'pill-red', pri:1 };
+  if (sub.includes('exchange') && sub.includes('approved')) return { cat:'action', label:'⚡ Action', pill:'pill-red', pri:1 };
+  if (s.includes('icici') || s.includes('sbi') || s.includes('razorpay') || s.includes('apple') ||
+      sub.includes('invoice') || sub.includes('transaction') || sub.includes('payment') ||
+      sub.includes('demat') || s.includes('cred.club')) return { cat:'finance', label:'💳 Finance', pill:'pill-orange', pri:2 };
+  if (s.includes('jobalerts') || s.includes('shine') || sub.includes('job opening') ||
+      sub.match(/engineer at|director,|lead engineer|software engineer at/)) return { cat:'jobs', label:'💼 Jobs', pill:'pill-blue', pri:3 };
+  return { cat:'other', label:'📧 Other', pill:'pill-gray', pri:5 };
+}
+
+function renderItem(t) {
+  const m = t.messages[0], c = cat(t);
+  const sub = clean(m.subject) || '(no subject)';
+  const from = (m.sender || '').replace(/<.*?>/, '').trim();
+  const snip = clean(m.snippet).slice(0, 70);
+  return `<div class="item">
+    <span class="pill ${c.pill}">${c.label}</span>
+    <div class="item-body">
+      <div class="item-subject">${sub}</div>
+      <div class="item-meta">${from}</div>
+      ${snip ? `<div class="snippet">${snip}…</div>` : ''}
+    </div>
+    <span class="item-time">${fmt(m.date)}</span>
+  </div>`;
+}
+
+async function load() {
+  document.getElementById('app').innerHTML = `<div class="loading"><div class="spinner"></div><span>Checking your inbox…</span></div>`;
+
+  const [today, imp, starred] = await Promise.all([
+    fetch('is:unread in:inbox newer_than:1d', 30),
+    fetch('is:unread in:inbox is:important newer_than:7d', 10),
+    fetch('is:starred is:unread newer_than:30d', 5),
+  ]);
+
+  const seen = new Set();
+  const all = [...today, ...imp, ...starred].filter(t => { if (seen.has(t.id)) return false; seen.add(t.id); return true; });
+  const withCat = all.map(t => ({...t, _c: cat(t)})).sort((a,b) => a._c.pri !== b._c.pri ? a._c.pri - b._c.pri : new Date(b.messages[0].date) - new Date(a.messages[0].date));
+
+  const actions  = withCat.filter(t => t._c.cat === 'action');
+  const finance  = withCat.filter(t => t._c.cat === 'finance');
+  const jobs     = withCat.filter(t => t._c.cat === 'jobs');
+  const others   = withCat.filter(t => !['action','finance','jobs'].includes(t._c.cat));
+
+  document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+
+  document.getElementById('app').innerHTML = `<div class="content">
+    <div class="summary-row">
+      <div class="stat-card stat-red"><div class="stat-num">${actions.length}</div><div class="stat-label">Action Required</div></div>
+      <div class="stat-card stat-orange"><div class="stat-num">${finance.length}</div><div class="stat-label">Finance Alerts</div></div>
+      <div class="stat-card stat-blue"><div class="stat-num">${jobs.length}</div><div class="stat-label">Job Leads</div></div>
+      <div class="stat-card stat-gray"><div class="stat-num">${today.length}</div><div class="stat-label">Unread Today</div></div>
+    </div>
+    ${actions.length ? `<div><div class="section-label">⚡ Action Required</div><div class="card">${actions.map(renderItem).join('')}</div></div>` : ''}
+    ${finance.length ? `<div><div class="section-label">💳 Finance & Payments</div><div class="card">${finance.map(renderItem).join('')}</div></div>` : ''}
+    ${jobs.length ? `<div><div class="section-label">💼 Job Opportunities</div><div class="card">${jobs.map(renderItem).join('')}</div></div>` : ''}
+    ${others.length ? `<div><div class="section-label">📬 Everything Else (${others.length})</div><div class="card">${others.slice(0,8).map(renderItem).join('')}</div></div>` : ''}
+  </div>`;
+}
+
+load();
+</script>
+</body>
+</html>
