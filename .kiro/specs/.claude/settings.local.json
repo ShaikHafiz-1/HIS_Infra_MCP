@@ -24,7 +24,8 @@
       "Bash(streamlit run *)",
       "Bash(curl -s http://localhost:8501/_stcore/health)",
       "Bash(python3 -m streamlit --version)",
-      "Bash(python -m streamlit --version)"
+      "Bash(python -m streamlit --version)",
+      "Bash(python -m py_compile business_demo.py)"
     ]
   }
 }

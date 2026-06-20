@@ -1255,7 +1255,7 @@ elif page == "🧠  Clinical Intelligence":
                 if val >= 1: return "background-color:#0d1f4a; color:white"
                 return "background-color:#0d2a0d; color:white"
             return ""
-        st.dataframe(df.style.applymap(color_news2, subset=["NEWS2"]), use_container_width=True, hide_index=True)
+        st.dataframe(df.style.map(color_news2, subset=["NEWS2"]), use_container_width=True, hide_index=True)
 
         # ── Alarm Fatigue Analysis ──
         st.markdown("### Alarm Correlation & Fatigue Reduction")
