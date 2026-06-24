@@ -1,261 +1,268 @@
 # Hospital Clinical Intelligence MCP Platform
 
-A comprehensive clinical data integration and retrieval system built on the Model Context Protocol (MCP). This platform ingests healthcare data from multiple sources (HL7 v2, FHIR, DICOM, device telemetry), normalizes and contextualizes it, and provides secure, role-based access through standardized MCP tools.
+**Production-grade clinical AI platform** combining live patient monitoring, Model Context Protocol (MCP) tool execution, RAG-grounded evidence retrieval, and Claude AI synthesis with HIPAA-compliant audit logging.
+
+> Architecture-review ready · Interview-demo ready · AI-first · MCP-native · RAG-grounded
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                 Streamlit Enterprise UI (6 pages)                    │
+│  Command Center · Clinical Intelligence · Patient Explorer          │
+│  AI Copilot · MCP Operations · Compliance & Audit                   │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │
+         ┌───────────────┼───────────────┐
+         ▼               ▼               ▼
+   ┌──────────┐   ┌──────────┐   ┌──────────────┐
+   │ Simulator│   │  FastAPI │   │ RAG Pipeline │
+   │ WebSocket│   │  MCP     │   │ TF-IDF/     │
+   │ Port 8001│   │  Server  │   │ sklearn      │
+   │ 5 pts    │   │ Port 8000│   │ 4 clinical   │
+   │ 5 scenes │   │ 10 tools │   │ protocols    │
+   └──────────┘   └────┬─────┘   └──────────────┘
+                       │
+              ┌────────┴────────┐
+              ▼                 ▼
+        ┌──────────┐    ┌──────────────┐
+        │PostgreSQL│    │    Redis     │
+        │TimescaleDB│   │   Cache +    │
+        │pgvector  │    │  Rate Limit  │
+        └──────────┘    └──────────────┘
+```
+
+**Query pipeline:** Intent classification → Parallel MCP tool execution → RAG retrieval → Claude synthesis → Safety guardrails → HIPAA audit log → Response
+
+---
 
 ## Features
 
-- **Multi-Source Data Ingestion**: HL7 v2, FHIR, DICOM, and device telemetry
-- **Data Normalization**: Unified patient, encounter, and device ID mapping
-- **Clinical Context Engine**: Event classification, timeline building, and confidence scoring
-- **10 Specialized MCP Tools**: Patient context, care unit summary, device events, diagnostic exams, and more
-- **Role-Based Access Control**: Physician, nurse, technician, and administrator roles
-- **Comprehensive Audit Logging**: Full compliance with healthcare regulations
-- **PHI Protection**: Automatic masking and encryption of sensitive data
-- **High Performance**: Sub-second response times with caching and optimization
+### Phase 1 — Frontend (6 pages)
+- **Command Center**: Live KPIs, unit risk heatmap, deterioration predictions, CRISIS alarm panel, live ECG/trend sparklines
+- **Clinical Intelligence**: AI finding cards with full evidence trail (MCP tools + RAG citations + confidence scores)
+- **Patient Explorer**: Per-patient 6-tab deep-dive (vitals, alarms, devices, timeline, AI assessment)
+- **AI Copilot**: Claude Haiku chat with real-time MCP tool trace panel + RAG sources + safety guardrails
+- **MCP Operations**: Tool registry, p50/p99 latency, health dashboard, recent API call log
+- **Compliance & Audit**: HIPAA audit log with PHI masking, compliance score, access analytics, CSV export
 
-## System Requirements
+### Phase 2 — Backend
+- FastAPI MCP Server with 10 registered clinical tools
+- PostgreSQL/TimescaleDB for time-series vitals
+- Redis for session caching and rate limiting
+- WebSocket endpoint for real-time vital sign streaming (`/api/v1/vitals/stream`)
+- REST Copilot endpoint (`POST /api/v1/copilot/query`)
+- JWT auth + RBAC with 4 clinician roles
 
-- Python 3.11 or higher
-- PostgreSQL 13 or higher
-- Redis 6.0 or higher
-- RabbitMQ 3.8 or higher
+### Phase 3 — Patient Monitor Simulator
+- 5 physiologically realistic patients, 5 clinical scenarios
+- WebSocket streaming: HR, SpO2, RR, BP, Temp, EtCO2, ECG every 2 seconds
+- NEWS2 calculation (RCP 2017) in real-time
+- IEC 60601-1-8 alarm tiers: CRISIS / WARNING / ADVISORY
 
-## Installation
+| Patient | Scenario | Key Feature |
+|---------|----------|-------------|
+| Carol Williams (PT-001) | Respiratory Deterioration | SpO2 drops 1%/90s, Draeger V500 offline at 60s |
+| Alice Johnson (PT-002) | Sepsis Risk | Temp rises 0.1°C/60s, MAP drops progressively |
+| Eleanor Thompson (PT-003) | Arrhythmia | Periodic high-HR bursts, PVC ECG pattern |
+| Bob Martinez (PT-004) | Post-Op Instability | MAP dip/recovery/second dip pattern |
+| David Chen (PT-005) | Device Disconnect | All vitals → NaN after 5 minutes |
 
-### 1. Clone the Repository
+### Phase 4 — MCP Tool Execution
+Every AI Copilot response shows:
+- Tools called (1–4 parallel) with arguments
+- Per-tool latency in milliseconds
+- Success/failure status
+- Structured result summary
+
+10 registered tools: `get_patient_clinical_context`, `get_care_unit_summary`, `get_device_events_by_patient`, `get_patient_event_timeline`, `get_alarm_context`, `get_diagnostic_exam_context`, `get_imaging_study_summary`, `get_anesthesia_case_context`, `get_neuro_event_context`, `get_cardiology_event_context`
+
+### Phase 5 — RAG Pipeline
+- 4 clinical knowledge documents (~800 words each)
+- Chunked with 200-word windows, 40-word overlap
+- TF-IDF retrieval (scikit-learn preferred, pure-Python fallback)
+- Top-3 chunks retrieved per query with confidence scores
+- Source citations shown in every AI response
+
+| Document | Coverage |
+|----------|----------|
+| `sepsis_protocol.md` | Sepsis-3, SIRS, qSOFA, Sepsis Six Bundle |
+| `respiratory_protocol.md` | SpO2 targets, O2 devices, NEWS2 scoring |
+| `alarm_management_policy.md` | IEC 60601-1-8 tiers, thresholds, artefact decision tree |
+| `device_troubleshooting.md` | SpO2/ECG/NIBP/ventilator/pump troubleshooting |
+
+### Phase 6 — AI Copilot Safety Guardrails
+- Advisory-only framing ("may suggest", "clinical review recommended")
+- Diagnosis language detection and flagging
+- Treatment order language detection and flagging
+- Explicit escalation recommendation when risk = CRITICAL
+- Confidence score (0.0–1.0) computed from tool success rate + RAG scores
+- Every response includes human-in-the-loop note
+
+### Phase 7 — HIPAA Compliance
+- PHI masking: `first_name`, `last_name`, `date_of_birth`, `mrn`, `ssn`, `address` never logged
+- JSONL audit log: one file per day, 7-year retention policy
+- Every tool call logged with: `timestamp`, `clinician_id`, `clinician_role`, `tool_name`, `patient_ids_accessed`, `success`, `response_time_ms`
+- JWT authentication with 8-hour session timeout
+- RBAC: physician / nurse / technician / administrator roles
+
+---
+
+## Quick Start
+
+### Option A — Streamlit only (no Docker, no backend)
 
 ```bash
-git clone https://github.com/hospital/clinical-mcp.git
-cd clinical-mcp
+# Install dependencies
+pip install streamlit pandas anthropic scikit-learn
+
+# Run the platform
+streamlit run enterprise_platform.py
 ```
 
-### 2. Create Virtual Environment
+Open **http://localhost:8501** — the simulator starts automatically.
+
+Optional: enter your `sk-ant-…` Anthropic API key in the sidebar for real Claude AI responses.
+
+### Option B — With FastAPI backend
 
 ```bash
-python3.11 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-### 3. Install Dependencies
-
-```bash
+# Terminal 1 — API server
 pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+
+# Terminal 2 — UI
+streamlit run enterprise_platform.py
 ```
 
-### 4. Configure Environment
+### Option C — Full Docker Compose
 
 ```bash
+# Copy and configure environment
 cp .env.example .env
-# Edit .env with your configuration
+# Edit .env: set ANTHROPIC_API_KEY, SECRET_KEY
+
+# Build and start all services
+docker compose up --build
+
+# Access:
+# UI:  http://localhost:8501
+# API: http://localhost:8000/api/docs
 ```
 
-### 5. Initialize Database
+---
 
-```bash
-# Run migrations
-alembic upgrade head
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | (empty) | Required for real Claude AI responses |
+| `DATABASE_URL` | `sqlite+aiosqlite:///./hci.db` | PostgreSQL URL for production |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection |
+| `SECRET_KEY` | changeme | JWT signing secret (32+ chars for production) |
+| `ENVIRONMENT` | `development` | `development` / `production` |
+| `DEBUG` | `true` | Enables `/api/docs` OpenAPI UI |
+
+---
+
+## API Reference
+
+### MCP Tools
+```
+POST /api/v1/tools/invoke      — invoke any MCP tool
+GET  /api/v1/tools/list        — list all registered tools
+GET  /api/v1/tools/stats       — tool call statistics
 ```
 
-## Configuration
-
-All configuration is managed through environment variables in the `.env` file. Key settings include:
-
-### Database
-- `DATABASE_URL`: PostgreSQL connection string
-- `DATABASE_POOL_SIZE`: Connection pool size (default: 20)
-
-### Redis
-- `REDIS_URL`: Redis connection string
-- `REDIS_CACHE_TTL`: Cache time-to-live in seconds (default: 3600)
-
-### RabbitMQ
-- `RABBITMQ_URL`: RabbitMQ connection string
-- `RABBITMQ_QUEUE_*`: Queue names for different data sources
-
-### Authentication
-- `JWT_SECRET_KEY`: Secret key for JWT tokens
-- `JWT_EXPIRATION_HOURS`: Token expiration time (default: 24)
-- `OAUTH2_PROVIDER_URL`: OAuth2 provider URL
-- `LDAP_SERVER_URL`: LDAP server URL
-
-### Data Ingestion
-- `HL7_LISTENER_PORT`: HL7 listener port (default: 2575)
-- `DICOM_LISTENER_PORT`: DICOM listener port (default: 11112)
-- `FHIR_SERVER_URL`: FHIR server URL
-
-## Running the Application
-
-### Development
-
-```bash
-python main.py
+### AI Copilot
+```
+POST /api/v1/copilot/query     — full MCP-RAG-Claude pipeline
+GET  /api/v1/copilot/rag/documents — list RAG knowledge base
+POST /api/v1/copilot/rag/search    — raw TF-IDF search
 ```
 
-The API will be available at `http://localhost:8000`
-
-### Production
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+### Vitals Streaming
+```
+WS   /api/v1/vitals/stream     — WebSocket: all patients every 2s
+GET  /api/v1/vitals/snapshot   — REST fallback: current state
+GET  /api/v1/vitals/alarms     — active alarms across all patients
 ```
 
-## API Documentation
+### Auth & Health
+```
+POST /api/v1/auth/token        — get JWT token
+GET  /health                   — service health check
+```
 
-Once the application is running, visit:
-- Swagger UI: `http://localhost:8000/api/docs`
-- ReDoc: `http://localhost:8000/api/redoc`
+---
 
 ## Project Structure
 
 ```
-hospital-clinical-mcp/
-├── main.py                          # FastAPI application entry point
-├── config.py                        # Configuration management
-├── requirements.txt                 # Python dependencies
-├── pyproject.toml                   # Project metadata
-├── .env.example                     # Environment variables template
-├── .gitignore                       # Git ignore rules
+Hospital_MCP/
+├── enterprise_platform.py      # Streamlit UI — all 6 pages
+├── main.py                     # FastAPI application
+├── config.py                   # Settings / environment
+├── requirements.txt
+├── docker-compose.yml
+├── Dockerfile.ui               # Streamlit container
+├── Dockerfile.api              # FastAPI container
+├── DEMO_SCRIPT.md              # 10-step respiratory deterioration demo
+│
+├── simulator/
+│   └── patient_monitor.py      # Physiological patient simulator
 │
 ├── mcp_server/
-│   ├── __init__.py
-│   ├── routers/                     # API route handlers
-│   ├── models/                      # Database models and schemas
-│   ├── tools/                       # MCP tool implementations
-│   ├── ingestion/                   # Data ingestion modules
-│   ├── normalization/               # Data normalization and mapping
-│   ├── context_engine/              # Clinical context engine
-│   ├── security/                    # Authentication and authorization
-│   ├── database/                    # Database connection and migrations
-│   └── utils/                       # Utility modules
+│   ├── mcp_server.py           # MCPServer core
+│   ├── models/schemas.py       # Pydantic models
+│   ├── tools/tool_registry.py  # 10 MCP tools
+│   ├── routers/
+│   │   ├── auth.py
+│   │   ├── health.py
+│   │   ├── mcp_tools.py
+│   │   ├── vitals_ws.py        # WebSocket streaming
+│   │   └── copilot_router.py   # AI Copilot endpoint
+│   ├── copilot/
+│   │   └── workflow.py         # MCP-RAG-Claude orchestrator
+│   ├── rag/
+│   │   ├── pipeline.py         # TF-IDF retrieval pipeline
+│   │   └── knowledge/
+│   │       ├── sepsis_protocol.md
+│   │       ├── respiratory_protocol.md
+│   │       ├── alarm_management_policy.md
+│   │       └── device_troubleshooting.md
+│   ├── security/
+│   │   ├── audit_logger.py     # HIPAA audit logging
+│   │   └── authorization.py    # RBAC
+│   └── database/
+│       ├── connection.py
+│       └── models.py
 │
-└── tests/                           # Test suite
-    ├── unit/                        # Unit tests
-    ├── integration/                 # Integration tests
-    └── fixtures/                    # Test fixtures and data
+├── tests/
+│   ├── test_tools_integration.py
+│   ├── test_rag.py
+│   ├── test_copilot.py
+│   └── test_simulator.py
+│
+└── demo_audit_logs/            # HIPAA audit JSONL files
 ```
 
-## Development
+---
 
-### Running Tests
+## Design Decisions
 
-```bash
-# Run all tests
-pytest
+**Simulator over mock data**: Real physiological trajectories (1%/90s SpO2 decline, NEWS2 real-time, 5 clinical scenarios) make the demo verifiable and interview-ready.
 
-# Run with coverage
-pytest --cov=mcp_server
+**TF-IDF RAG over embeddings**: Zero-latency at import, no external API calls, deterministic retrieval. Scikit-learn when available, pure Python fallback. Embeddings (pgvector) can replace this for production without changing the interface.
 
-# Run specific test file
-pytest tests/unit/test_validators.py
+**Safety guardrails as code not prompt**: Advisory framing and prohibited language detection are Python functions that run on every response regardless of LLM output. The LLM cannot bypass them.
 
-# Run with verbose output
-pytest -v
-```
+**HIPAA audit logging first**: Every tool call is logged before the response is sent. Audit completeness is guaranteed even if the response itself fails.
 
-### Code Quality
+---
 
-```bash
-# Format code
-black mcp_server tests
+## Demo
 
-# Check code style
-flake8 mcp_server tests
-
-# Type checking
-mypy mcp_server
-
-# Sort imports
-isort mcp_server tests
-```
-
-## MCP Tools
-
-The platform provides 10 specialized MCP tools:
-
-1. **get_patient_clinical_context**: Retrieve comprehensive clinical context for a patient
-2. **get_care_unit_summary**: Get summary of all patients in a care unit
-3. **get_device_events_by_patient**: Retrieve device events and alarms for a patient
-4. **get_diagnostic_exam_context**: Get diagnostic exam context with findings
-5. **get_patient_event_timeline**: Retrieve chronological timeline of clinical events
-6. **get_alarm_context**: Get detailed context for a specific alarm event
-7. **get_imaging_study_summary**: Retrieve imaging study summaries with findings
-8. **get_anesthesia_case_context**: Get comprehensive anesthesia case context
-9. **get_neuro_event_context**: Retrieve neurological event context
-10. **get_cardiology_event_context**: Get cardiac event context
-
-## Security
-
-- **Authentication**: OAuth2/JWT with LDAP integration
-- **Authorization**: Role-based access control (RBAC)
-- **Encryption**: TLS for data in transit, encryption at rest for sensitive data
-- **Audit Logging**: Comprehensive logging of all data access
-- **PHI Protection**: Automatic masking of protected health information
-
-## Performance
-
-- **Response Times**: < 500ms for patient context queries
-- **Concurrency**: Support for 100+ concurrent clinicians
-- **Caching**: Redis-based caching for frequently accessed data
-- **Indexing**: Optimized database indexes for fast retrieval
-
-## Compliance
-
-- **HIPAA**: Full compliance with HIPAA regulations
-- **Data Retention**: 7-year retention policy for clinical data and audit logs
-- **Audit Trail**: Complete audit trail of all data access
-- **Consent Management**: Patient consent checking before data access
-
-## Troubleshooting
-
-### Database Connection Issues
-
-```bash
-# Check PostgreSQL connection
-psql -h localhost -U user -d hospital_clinical_mcp
-
-# Check connection string in .env
-DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/hospital_clinical_mcp
-```
-
-### Redis Connection Issues
-
-```bash
-# Check Redis connection
-redis-cli ping
-
-# Check Redis URL in .env
-REDIS_URL=redis://localhost:6379/0
-```
-
-### RabbitMQ Connection Issues
-
-```bash
-# Check RabbitMQ connection
-rabbitmqctl status
-
-# Check RabbitMQ URL in .env
-RABBITMQ_URL=amqp://guest:guest@localhost:5672/
-```
-
-## Contributing
-
-1. Create a feature branch: `git checkout -b feature/your-feature`
-2. Commit changes: `git commit -am 'Add your feature'`
-3. Push to branch: `git push origin feature/your-feature`
-4. Submit a pull request
-
-## License
-
-MIT License - See LICENSE file for details
-
-## Support
-
-For support, contact the Hospital IT Team at it@hospital.local
-
-## Changelog
-
-### Version 0.1.0 (Initial Release)
-- FastAPI project structure and dependencies
-- Configuration management with environment variables
-- Basic health check endpoints
-- Logging and validation utilities
+See [DEMO_SCRIPT.md](DEMO_SCRIPT.md) for the full 10-step respiratory deterioration walkthrough.

@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from config import settings
 from mcp_server.mcp_server import MCPServer
 from mcp_server.routers import auth, health, mcp_tools
+from mcp_server.routers import vitals_ws, copilot_router
 from mcp_server.security.authorization import (
     AuthorizationError,
     PermissionDeniedError,
@@ -126,6 +127,8 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(health.router)
     app.include_router(mcp_tools.router)
+    app.include_router(vitals_ws.router)
+    app.include_router(copilot_router.router)
 
     # Root endpoint
     @app.get("/", tags=["Root"])

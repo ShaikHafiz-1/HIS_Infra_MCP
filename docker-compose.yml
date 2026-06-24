@@ -1,99 +1,102 @@
 version: "3.9"
 
+# ─────────────────────────────────────────────────────────────────
+# Hospital Clinical Intelligence MCP Platform — Docker Compose
+# Services: Streamlit UI · FastAPI MCP Server · PostgreSQL/TimescaleDB
+#           · Redis · (optional pgvector extension)
+# ─────────────────────────────────────────────────────────────────
+
 services:
-  mcp_server:
+
+  # ── Streamlit Enterprise UI ──────────────────────────────────────
+  ui:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.ui
+    container_name: hci_ui
     ports:
-      - "8000:8000"
+      - "8501:8501"
     environment:
-      DATABASE_URL: postgresql+asyncpg://mcp_user:mcp_pass@db:5432/hospital_mcp
-      REDIS_URL: redis://redis:6379/0
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
-      ENVIRONMENT: development
-      DEBUG: "false"
-      LOG_LEVEL: INFO
-      ENABLE_CACHING: "true"
-      ENABLE_AUDIT_LOGGING: "true"
-      ENABLE_HL7_INGESTION: "true"
-      ENABLE_FHIR_INGESTION: "true"
-      ENABLE_DICOM_INGESTION: "true"
-      ENABLE_DEVICE_TELEMETRY: "true"
-      JWT_SECRET_KEY: dev-secret-change-in-production-min-32-chars
-      CORS_ORIGINS: '["http://localhost:3000","http://localhost:8080"]'
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     volumes:
-      - audit_logs:/app/audit_logs
+      - ./demo_audit_logs:/app/demo_audit_logs
+    depends_on:
+      - api
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:8501/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
 
-  db:
-    image: postgres:15-alpine
+  # ── FastAPI MCP Server ───────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: hci_api
+    ports:
+      - "8000:8000"
     environment:
-      POSTGRES_DB: hospital_mcp
-      POSTGRES_USER: mcp_user
-      POSTGRES_PASSWORD: mcp_pass
+      - DATABASE_URL=postgresql+asyncpg://hci:hci_pass@postgres:5432/hci_db
+      - REDIS_URL=redis://redis:6379/0
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - SECRET_KEY=${SECRET_KEY:-change-me-in-production-32-chars-min}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./demo_audit_logs:/app/demo_audit_logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── PostgreSQL + TimescaleDB ─────────────────────────────────────
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: hci_postgres
     ports:
       - "5432:5432"
+    environment:
+      - POSTGRES_USER=hci
+      - POSTGRES_PASSWORD=hci_pass
+      - POSTGRES_DB=hci_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U mcp_user -d hospital_mcp"]
+      test: ["CMD-SHELL", "pg_isready -U hci -d hci_db"]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
 
+  # ── Redis (session cache + rate limiter) ─────────────────────────
   redis:
     image: redis:7-alpine
+    container_name: hci_redis
     ports:
       - "6379:6379"
+    command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 5s
+      timeout: 3s
       retries: 5
-    restart: unless-stopped
-
-  rabbitmq:
-    image: rabbitmq:3.12-management-alpine
-    ports:
-      - "5672:5672"
-      - "15672:15672"  # Management UI
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "check_port_connectivity"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
-  rabbitmq_data:
-  audit_logs:
 
 networks:
   default:
-    name: hospital_mcp_network
+    name: hci_network
