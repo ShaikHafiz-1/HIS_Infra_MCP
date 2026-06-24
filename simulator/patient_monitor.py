@@ -132,11 +132,11 @@ def _news2(hr: float, sbp: float, rr: float, spo2: float,
            temp: float, on_o2: bool = False, avpu: str = "A") -> int:
     score = 0
 
-    # RR
+    # RR — RCP 2017 table
     if rr <= 8 or rr >= 25:  score += 3
     elif rr >= 21:            score += 2
-    elif rr >= 9:             score += 0
-    else:                     score += 1   # shouldn't reach
+    elif rr >= 12:            score += 0   # 12-20: no score
+    elif rr >= 9:             score += 1   # 9-11: +1
 
     # SpO2 (scale 1 — no COPD)
     if spo2 <= 91:            score += 3
@@ -290,9 +290,10 @@ def _apply_scenario(profile: PatientProfile, elapsed: float, rng: random.Random
         dbp = max(42.0, profile.base_dbp - drop * 0.7)
 
     elif s == ScenarioType.DEVICE_DISCONNECT:
-        # After 5 minutes device goes offline, vitals show artifact
+        # After 5 minutes all vitals go offline (hr=NaN triggers offline flag)
         if elapsed > 300:
-            return (hr, sbp, dbp, float("nan"), float("nan"), temp, None)
+            return (float("nan"), float("nan"), float("nan"),
+                    float("nan"), float("nan"), float("nan"), None)
 
     # Add physiological noise
     hr   += rng.gauss(0, 1.5)
@@ -540,19 +541,25 @@ class PatientSimulator:
         rng = self._rngs[profile.patient_id]
         hr, sbp, dbp, spo2, rr, temp, etco2 = _apply_scenario(profile, elapsed, rng)
 
-        # Handle device-offline NaN values
-        offline = math.isnan(hr) if not math.isfinite(hr) else False
+        # Handle device-offline NaN values (hr is the sentinel)
+        offline = math.isnan(hr)
         if offline:
             hr = sbp = dbp = spo2 = rr = float("nan")
 
         map_val = (sbp + 2 * dbp) / 3.0 if not offline else float("nan")
 
-        # Trends
+        # Trends — skip offline ticks; preserve last known values
         tb = self._trends[profile.patient_id]
-        hr_t   = tb["hr"].push(hr   if not math.isnan(hr)   else 0)
-        spo2_t = tb["spo2"].push(spo2 if not math.isnan(spo2) else 0)
-        rr_t   = tb["rr"].push(rr   if not math.isnan(rr)   else 0)
-        map_t  = tb["map"].push(map_val if not math.isnan(map_val) else 0)
+        if not offline:
+            hr_t   = tb["hr"].push(hr)
+            spo2_t = tb["spo2"].push(spo2)
+            rr_t   = tb["rr"].push(rr)
+            map_t  = tb["map"].push(map_val)
+        else:
+            hr_t   = tb["hr"]._buf[:]
+            spo2_t = tb["spo2"]._buf[:]
+            rr_t   = tb["rr"]._buf[:]
+            map_t  = tb["map"]._buf[:]
 
         # NEWS2
         n2 = 0 if offline else _news2(hr, sbp, rr, spo2, temp,
@@ -636,15 +643,14 @@ class PatientSimulator:
         return PATIENT_PROFILES
 
     def get_active_alarms(self) -> List[AlarmEvent]:
+        """Return alarms from current live snapshots — not stale history."""
         with self._lock:
-            # Return highest-priority alarm per patient
-            seen: Dict[str, AlarmEvent] = {}
-            for a in reversed(self._alarm_history):
-                if a.patient_id not in seen:
-                    seen[a.patient_id] = a
-            all_alarms = list(self._alarm_history[-50:])
+            all_alarms: List[AlarmEvent] = []
+            for snap in self._snapshots.values():
+                all_alarms.extend(snap.active_alarms)
+        tier_order = {"CRISIS": 0, "WARNING": 1, "ADVISORY": 2}
         return sorted(all_alarms, key=lambda a: (
-            {"CRISIS": 0, "WARNING": 1, "ADVISORY": 2}[a.tier], a.fired_at
+            tier_order.get(str(a.tier), 2), a.fired_at
         ))
 
     def get_alarm_history(self, patient_id: Optional[str] = None,

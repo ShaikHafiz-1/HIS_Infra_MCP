@@ -509,10 +509,11 @@ def render_command_center(sim):
 
     # ── KPI Row ──
     c1,c2,c3,c4,c5,c6 = st.columns(6)
+    total_devices = sum(len(p.devices) for p in sim.get_all_profiles())
     c1.metric("Active Patients", len(all_snaps))
     c2.metric("High Risk",       n_crit, delta="+2 last 2h", delta_color="inverse")
     c3.metric("CRISIS Alarms",   n_alarm, delta="+1 last 15m", delta_color="inverse")
-    c4.metric("Devices Online",  f"{sum(len(s.devices_online) for s in all_snaps)}/16")
+    c4.metric("Devices Online",  f"{sum(len(s.devices_online) for s in all_snaps)}/{total_devices}")
     c5.metric("Devices Offline", n_devs_off, delta_color="inverse")
     c6.metric("RAG Chunks",      _get_rag().chunk_count)
 
@@ -902,9 +903,10 @@ _UNIT_ALIASES = {
 
 
 def _extract_unit(q: str) -> Optional[str]:
-    q_l = q.lower()
+    # Pad with spaces so we can do whole-word matching without regex
+    q_padded = f" {q.lower()} "
     for alias, canonical in _UNIT_ALIASES.items():
-        if alias in q_l:
+        if f" {alias} " in q_padded or f" {alias}?" in q_padded or q_padded.startswith(f" {alias} "):
             return canonical
     return None
 
@@ -2215,18 +2217,23 @@ def main():
 
     page = st.session_state.get("page", "cmd")
 
-    if page == "cmd":
-        _live_cmd(sim)
-    elif page == "clin":
-        _live_clin(sim)
-    elif page == "pat":
-        render_patient_explorer(sim)
-    elif page == "cop":
-        render_ai_copilot(sim)
-    elif page == "mcp":
-        _live_mcp(sim)
-    elif page == "aud":
-        render_compliance_audit(sim)
+    _PAGE_FN = {
+        "cmd":  lambda: _live_cmd(sim),
+        "clin": lambda: _live_clin(sim),
+        "pat":  lambda: render_patient_explorer(sim),
+        "cop":  lambda: render_ai_copilot(sim),
+        "mcp":  lambda: _live_mcp(sim),
+        "aud":  lambda: render_compliance_audit(sim),
+    }
+    fn = _PAGE_FN.get(page)
+    if fn:
+        try:
+            fn()
+        except Exception as _page_err:
+            st.error(f"**Page render error** — {type(_page_err).__name__}: {_page_err}")
+            with st.expander("Stack trace (for debugging)"):
+                import traceback
+                st.code(traceback.format_exc(), language="python")
 
 
 if __name__ == "__main__":
