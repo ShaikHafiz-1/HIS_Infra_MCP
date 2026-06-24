@@ -2179,6 +2179,27 @@ def render_compliance_audit(sim):
 
 
 # ===========================================================================
+# LIVE FRAGMENTS — auto-refresh without blocking navigation
+# @st.fragment(run_every=N) reruns ONLY the fragment on the timer;
+# the sidebar and navigation buttons remain fully interactive.
+# ===========================================================================
+
+@st.fragment(run_every=5)
+def _live_cmd(sim):
+    render_command_center(sim)
+
+
+@st.fragment(run_every=5)
+def _live_clin(sim):
+    render_clinical_intelligence(sim)
+
+
+@st.fragment(run_every=5)
+def _live_mcp(sim):
+    render_mcp_operations(sim)
+
+
+# ===========================================================================
 # MAIN
 # ===========================================================================
 def main():
@@ -2195,23 +2216,17 @@ def main():
     page = st.session_state.get("page", "cmd")
 
     if page == "cmd":
-        render_command_center(sim)
+        _live_cmd(sim)
     elif page == "clin":
-        render_clinical_intelligence(sim)
+        _live_clin(sim)
     elif page == "pat":
         render_patient_explorer(sim)
     elif page == "cop":
         render_ai_copilot(sim)
     elif page == "mcp":
-        render_mcp_operations(sim)
+        _live_mcp(sim)
     elif page == "aud":
         render_compliance_audit(sim)
-
-    # Auto-refresh every 5 seconds on live pages
-    if page in ("cmd", "clin", "mcp"):
-        import time as _t
-        _t.sleep(0.1)
-        st.rerun()
 
 
 if __name__ == "__main__":
