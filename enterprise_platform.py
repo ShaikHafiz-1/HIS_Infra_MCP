@@ -863,6 +863,297 @@ def _html_table(rows: List[dict], col_widths: Optional[dict] = None) -> str:
 
 
 # ===========================================================================
+# FHIR CONNECTOR CACHE  (lazy-init, safe to call when FHIR not configured)
+# ===========================================================================
+
+@st.cache_resource
+def _get_fhir_connector_cached():
+    """Cached singleton — returns FHIRConnector (may be disabled)."""
+    try:
+        from mcp_server.fhir.connector import get_fhir_connector
+        return get_fhir_connector()
+    except Exception:
+        return None
+
+
+def _fhir_enabled() -> bool:
+    """True when a FHIR base URL has been configured."""
+    conn = _get_fhir_connector_cached()
+    return conn is not None and conn.is_enabled()
+
+
+# ===========================================================================
+# FHIR INTENT HANDLERS  (prefixed with _handle_fhir_)
+# Each calls the business-logic layer in mcp_server.fhir.fhir_tools,
+# then formats the result as a CopilotResult so it plugs into the
+# existing UI without any changes.
+# ===========================================================================
+
+def _handle_fhir_patient_by_id(patient_id: str, audit_id: str, t0: float) -> "CopilotResult":
+    import time
+    from mcp_server.fhir.fhir_tools import get_patient_by_id
+    data = get_patient_by_id(patient_id)
+
+    if not data.get("fhir_enabled") or "error" in data:
+        return None  # fall through to simulator
+
+    v = data.get("vitals", {})
+    vitals_str = (
+        f"HR {v.get('hr') or '?':.0f} bpm  |  "
+        f"SpO2 {v.get('spo2') or '?':.0f}%  |  "
+        f"RR {v.get('rr') or '?':.0f}/min  |  "
+        f"BP {v.get('sbp') or '?':.0f}/{v.get('dbp') or '?':.0f}  |  "
+        f"Temp {v.get('temp') or '?':.1f}°C"
+    ) if any(v.values()) else "No vital data available"
+
+    conds = ", ".join(c["display"] for c in data.get("conditions", [])[:3]) or "None on file"
+    meds  = ", ".join(m["name"] for m in data.get("medications", [])[:3]) or "None on file"
+
+    answer = (
+        f"**{data['name']}** | {data.get('age', '?')} y/o {data.get('gender', '')} | "
+        f"MRN: {data.get('mrn', 'N/A')}\n\n"
+        f"**Vitals:** {vitals_str}\n"
+        f"**NEWS2:** {data.get('news2', 0)} — **Risk:** {data.get('risk_level', 'UNKNOWN')}\n"
+        f"**Conditions:** {conds}\n"
+        f"**Medications:** {meds}\n"
+        f"**Devices:** {len(data.get('devices', []))} linked\n\n"
+        f"> Source: FHIR R4 ({_get_fhir_connector_cached().base_url})"
+    )
+    traces = [{"tool": "fhir_get_patient", "patient_id": patient_id, "status": "ok"}]
+    return CopilotResult(
+        answer=answer, tool_traces=traces, confidence=0.92, confidence_tier="high",
+        audit_id=audit_id, total_ms=round((time.time() - t0) * 1000, 1),
+        escalation_note=(
+            "🔴 Immediate clinical review recommended — NEWS2 ≥ 7"
+            if data.get("news2", 0) >= 7 else "Review at next scheduled assessment."
+        ),
+    )
+
+
+def _handle_fhir_search_patients(name: str, audit_id: str, t0: float) -> "CopilotResult":
+    import time
+    from mcp_server.fhir.fhir_tools import search_patients
+    data = search_patients(name)
+
+    if not data.get("fhir_enabled"):
+        return None
+
+    pts = data.get("patients", [])
+    if not pts:
+        answer = f"No FHIR patients found matching **{name}**."
+    else:
+        lines = [f"**{p.get('name', 'Unknown')}** | FHIR ID: `{p['patient_id']}` | "
+                 f"Age: {p.get('age', '?')} | Gender: {p.get('gender', '?')}"
+                 for p in pts[:10]]
+        answer = f"Found **{len(pts)}** patient(s) matching '{name}':\n\n" + "\n".join(f"- {l}" for l in lines)
+
+    traces = [{"tool": "fhir_search_patients", "query": name, "count": len(pts)}]
+    return CopilotResult(
+        answer=answer, tool_traces=traces, confidence=0.95, confidence_tier="high",
+        audit_id=audit_id, total_ms=round((time.time() - t0) * 1000, 1),
+    )
+
+
+def _handle_fhir_icu_census(audit_id: str, t0: float) -> "CopilotResult":
+    import time
+    from mcp_server.fhir.fhir_tools import get_icu_patients
+    data = get_icu_patients()
+
+    if not data.get("fhir_enabled"):
+        return None
+
+    pts = data.get("patients", [])
+    answer = (
+        f"**FHIR Inpatient Census** — {len(pts)} active encounter(s)\n\n"
+        + ("\n".join(
+            f"- **{p.get('name','?')}** | MRN: {p.get('mrn','N/A')} | "
+            f"Admitted: {p.get('encounter_start','?')[:10]}"
+            for p in pts[:15]
+        ) if pts else "_No inpatient encounters found._")
+        + f"\n\n> Source: FHIR R4 ({_get_fhir_connector_cached().base_url})"
+    )
+    traces = [{"tool": "fhir_get_icu_patients", "count": len(pts)}]
+    return CopilotResult(
+        answer=answer, tool_traces=traces, confidence=0.93, confidence_tier="high",
+        audit_id=audit_id, total_ms=round((time.time() - t0) * 1000, 1),
+    )
+
+
+def _handle_fhir_low_spo2(threshold: float, audit_id: str, t0: float) -> "CopilotResult":
+    import time
+    from mcp_server.fhir.fhir_tools import get_patients_with_low_spo2
+    data = get_patients_with_low_spo2(threshold)
+
+    if not data.get("fhir_enabled"):
+        return None
+
+    pts = data.get("patients", [])
+    if not pts:
+        answer = f"No FHIR patients found with SpO2 below {threshold}%."
+    else:
+        lines = [f"- **{p['patient_id']}** — SpO2 {p.get('spo2', '?')}% at {p.get('time','?')[:16]}"
+                 for p in pts]
+        answer = (
+            f"**{len(pts)} patient(s) with SpO2 < {threshold}%** (FHIR R4):\n\n"
+            + "\n".join(lines)
+        )
+    traces = [{"tool": "fhir_get_patients_with_low_spo2", "threshold": threshold, "count": len(pts)}]
+    return CopilotResult(
+        answer=answer, tool_traces=traces, confidence=0.95, confidence_tier="high",
+        audit_id=audit_id, total_ms=round((time.time() - t0) * 1000, 1),
+        escalation_note="🔴 Critical SpO2 — immediate clinical review required." if pts else "No action.",
+    )
+
+
+def _handle_fhir_arrhythmia(audit_id: str, t0: float) -> "CopilotResult":
+    import time
+    from mcp_server.fhir.fhir_tools import get_patients_with_arrhythmia
+    data = get_patients_with_arrhythmia()
+
+    if not data.get("fhir_enabled"):
+        return None
+
+    pts = data.get("patients", [])
+    if not pts:
+        answer = "No FHIR patients found with arrhythmia conditions."
+    else:
+        lines = [f"- **{p.get('name', p['patient_id'])}** — {p.get('condition', 'Arrhythmia')}"
+                 for p in pts]
+        answer = (
+            f"**{len(pts)} FHIR patient(s) with arrhythmia conditions:**\n\n"
+            + "\n".join(lines)
+            + f"\n\n> Source: FHIR R4 ({_get_fhir_connector_cached().base_url})"
+        )
+    traces = [{"tool": "fhir_get_patients_with_arrhythmia", "count": len(pts)}]
+    return CopilotResult(
+        answer=answer, tool_traces=traces, confidence=0.93, confidence_tier="high",
+        audit_id=audit_id, total_ms=round((time.time() - t0) * 1000, 1),
+    )
+
+
+def _handle_fhir_patient_timeline(patient_id: str, audit_id: str, t0: float) -> "CopilotResult":
+    import time
+    from mcp_server.fhir.fhir_tools import get_patient_timeline
+    data = get_patient_timeline(patient_id)
+
+    if not data.get("fhir_enabled"):
+        return None
+
+    events = data.get("events", [])
+    if not events:
+        answer = f"No FHIR timeline events found for patient `{patient_id}`."
+    else:
+        lines = [f"- `{e.get('time','?')[:16]}` **{e.get('type','?').upper()}** — {e.get('description','')}"
+                 for e in events[:20]]
+        answer = (
+            f"**FHIR Timeline for `{patient_id}`** ({len(events)} events):\n\n"
+            + "\n".join(lines)
+        )
+    traces = [{"tool": "fhir_get_patient_timeline", "patient_id": patient_id, "count": len(events)}]
+    return CopilotResult(
+        answer=answer, tool_traces=traces, confidence=0.92, confidence_tier="high",
+        audit_id=audit_id, total_ms=round((time.time() - t0) * 1000, 1),
+    )
+
+
+def _handle_fhir_summarize_patient(patient_id: str, audit_id: str, t0: float) -> "CopilotResult":
+    import time
+    from mcp_server.fhir.fhir_tools import summarize_patient_status
+    data = summarize_patient_status(patient_id)
+
+    if not data.get("fhir_enabled") or "error" in data:
+        return None
+
+    traces = [{"tool": "fhir_summarize_patient_status", "patient_id": patient_id}]
+    return CopilotResult(
+        answer=data.get("summary_text", "No summary available."),
+        tool_traces=traces, confidence=0.92, confidence_tier="high",
+        audit_id=audit_id, total_ms=round((time.time() - t0) * 1000, 1),
+        escalation_note=(
+            "🔴 Immediate escalation — NEWS2 ≥ 7."
+            if data.get("news2", 0) >= 7 else "Review at next assessment."
+        ),
+    )
+
+
+def _fhir_route(q: str, audit_id: str, t0: float) -> Optional["CopilotResult"]:
+    """
+    Dispatch to FHIR-backed handlers if FHIR is enabled.
+    Returns a CopilotResult on match, or None to fall through to simulator.
+    """
+    if not _fhir_enabled():
+        return None
+
+    # FHIR patient lookup by FHIR ID (explicit: "fhir patient pt-hapi-001")
+    if "fhir patient" in q or "fhir id" in q:
+        # Extract bare FHIR ID after the keyword
+        parts = q.split()
+        for i, w in enumerate(parts):
+            if w in ("patient", "id") and i + 1 < len(parts):
+                candidate = parts[i + 1].strip(".,?")
+                result = _handle_fhir_patient_by_id(candidate, audit_id, t0)
+                if result:
+                    return result
+
+    # FHIR patient search by name
+    if "fhir search" in q or ("fhir" in q and any(w in q for w in ["find patient", "search patient", "look up"])):
+        # Extract name: "fhir search john doe"
+        for kw in ("search", "find", "look up", "lookup"):
+            if kw in q:
+                idx = q.index(kw) + len(kw)
+                name = q[idx:].strip().split("fhir")[0].strip().strip(".,?")
+                if name:
+                    result = _handle_fhir_search_patients(name, audit_id, t0)
+                    if result:
+                        return result
+                break
+
+    # FHIR ICU census
+    if "fhir" in q and any(w in q for w in ["icu", "inpatient", "census", "how many", "ward"]):
+        result = _handle_fhir_icu_census(audit_id, t0)
+        if result:
+            return result
+
+    # FHIR low SpO2
+    if "fhir" in q and any(w in q for w in ["spo2", "oxygen", "low spo2", "hypoxia", "hypoxic"]):
+        threshold = 90.0
+        if "85" in q:   threshold = 85.0
+        elif "88" in q: threshold = 88.0
+        elif "92" in q: threshold = 92.0
+        result = _handle_fhir_low_spo2(threshold, audit_id, t0)
+        if result:
+            return result
+
+    # FHIR arrhythmia patients
+    if "fhir" in q and any(w in q for w in ["arrhythmia", "atrial fibrillation", "af ", " af"]):
+        result = _handle_fhir_arrhythmia(audit_id, t0)
+        if result:
+            return result
+
+    # FHIR patient timeline
+    if "fhir" in q and any(w in q for w in ["timeline", "history", "events", "what happened"]):
+        parts = q.split()
+        for i, w in enumerate(parts):
+            if w in ("patient", "id", "for") and i + 1 < len(parts):
+                candidate = parts[i + 1].strip(".,?")
+                result = _handle_fhir_patient_timeline(candidate, audit_id, t0)
+                if result:
+                    return result
+
+    # FHIR summarize
+    if "fhir" in q and any(w in q for w in ["summarize", "summary", "status of", "status for"]):
+        parts = q.split()
+        for i, w in enumerate(parts):
+            if w in ("patient", "of", "for") and i + 1 < len(parts):
+                candidate = parts[i + 1].strip(".,?")
+                result = _handle_fhir_summarize_patient(candidate, audit_id, t0)
+                if result:
+                    return result
+
+    return None
+
+
+# ===========================================================================
 # DETERMINISTIC DATA LAYER — live simulator queries
 # ===========================================================================
 
@@ -1374,13 +1665,20 @@ def _out_of_scope_response(q: str, audit_id: str, t0: float) -> CopilotResult:
 def _route_query(question: str, sim) -> Optional[CopilotResult]:
     """
     Route query to a deterministic handler. Returns None to signal LLM fallback.
-    Priority: unit census → patient name → condition → high-risk → alarm → device → tool → rag → fallback
+    Priority: FHIR (if enabled) → patient name → unit census → condition →
+              high-risk → alarm → device → tool → rag → fallback
     """
     import time
     t0  = time.time()
     q   = question.lower().strip()
     snaps    = {s.patient_id: s for s in sim.get_all_snapshots()}
     audit_id = _make_audit_id()
+
+    # 0. FHIR-backed handlers (when FHIR_BASE_URL is configured and query
+    #    explicitly mentions 'fhir' to avoid shadowing simulator responses)
+    fhir_result = _fhir_route(q, audit_id, t0)
+    if fhir_result is not None:
+        return fhir_result
 
     # 1. Specific patient by name
     name_match = _extract_patient_name(sim, q)

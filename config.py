@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     hl7_listener_port: int = int(os.getenv("HL7_LISTENER_PORT", "2575"))
     hl7_listener_timeout: int = int(os.getenv("HL7_LISTENER_TIMEOUT", "300"))
 
-    # FHIR Configuration
+    # FHIR Configuration (ingestion pipeline — internal hospital FHIR server)
     fhir_server_url: str = os.getenv("FHIR_SERVER_URL", "https://fhir.hospital.local/fhir")
     fhir_client_id: str = os.getenv("FHIR_CLIENT_ID", "mcp_server")
     fhir_client_secret: str = os.getenv("FHIR_CLIENT_SECRET", "")
@@ -60,6 +60,17 @@ class Settings(BaseSettings):
         "https://auth.hospital.local/oauth/token"
     )
     fhir_sync_interval: int = int(os.getenv("FHIR_SYNC_INTERVAL", "3600"))
+
+    # FHIR Connector Configuration (real-time MCP query layer)
+    # Leave FHIR_BASE_URL empty to use simulator data only.
+    # Sandbox: export FHIR_BASE_URL=https://hapi.fhir.org/baseR4 FHIR_USE_SANDBOX_MODE=true
+    fhir_base_url: str = os.getenv("FHIR_BASE_URL", "")
+    fhir_auth_type: str = os.getenv("FHIR_AUTH_TYPE", "none")
+    fhir_token: str = os.getenv("FHIR_TOKEN", "")
+    fhir_username: str = os.getenv("FHIR_USERNAME", "")
+    fhir_password: str = os.getenv("FHIR_PASSWORD", "")
+    fhir_timeout_seconds: int = int(os.getenv("FHIR_TIMEOUT_SECONDS", "10"))
+    fhir_use_sandbox_mode: bool = os.getenv("FHIR_USE_SANDBOX_MODE", "false").lower() == "true"
 
     # DICOM Configuration
     dicom_listener_host: str = os.getenv("DICOM_LISTENER_HOST", "0.0.0.0")

@@ -19,13 +19,14 @@ from mcp_server.tools.anesthesia_context import AnesthesiaCaseTool
 from mcp_server.tools.neuro_context import NeuroEventTool
 from mcp_server.tools.cardiology_context import CardiologyEventTool
 from mcp_server.database.connection import DatabaseConnection
+from mcp_server.tools.fhir_tool_registry import register_fhir_tools
 from mcp_server.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 async def register_all_tools(mcp_server: MCPServer) -> None:
-    """Register all 10 MCP tools with the server."""
+    """Register all MCP tools (10 simulator + 13 FHIR-backed)."""
     logger.info("Registering MCP tools...")
 
     await _register_patient_clinical_context(mcp_server)
@@ -38,6 +39,9 @@ async def register_all_tools(mcp_server: MCPServer) -> None:
     await _register_anesthesia_case_context(mcp_server)
     await _register_neuro_event_context(mcp_server)
     await _register_cardiology_event_context(mcp_server)
+
+    # FHIR-backed tools (registered separately, no conflict with above 10)
+    await register_fhir_tools(mcp_server)
 
     logger.info(f"Registered {len(mcp_server.list_tools())} tools")
 
